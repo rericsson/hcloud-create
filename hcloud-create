@@ -1,0 +1,89 @@
+#!/bin/bash
+set -euo pipefail
+
+# make a choice that is then handled in main
+# use: choice <prompt>
+# returns: global variable CHOICE
+
+function choice {
+
+    CHOICE=''
+    local prompt="$*"
+    local answer
+
+    read -p "$prompt" answer
+    case "$answer" in  
+        [yY1] ) CHOICE='y';;
+        [nN0] ) CHOICE='n';;
+        *     ) CHOICE="$answer";;
+    esac
+} # end of function choice
+
+# hcloud arguments
+NAME=tiger
+IMAGE=ubuntu-20.04
+TYPE=cx11
+SSH_KEY=id_hetzner
+
+# cloud-config arguments
+USER_NAME=demo
+SSH_PUB_KEY=`cat ~/.ssh/$SSH_KEY.pub`
+SSH_PORT=4444
+
+# use getopts to get the arguments 
+while getopts 'n:i:t:s:u:p:' OPTION
+do
+    case $OPTION in
+        n) NAME="$OPTARG"
+           ;;  
+        i) IMAGE="$OPTARG"
+           ;;  
+        t) TYPE="$OPTARG"
+           ;;  
+        u) USER_NAME="$OPTARG"
+           ;;  
+        s) SSH_KEY="$OPTARG"
+           ;;  
+        p) SSH_PORT="$OPTARG"
+           ;;
+        ?) printf "Usage: %s -n server_name -i "\
+           "image -t value -s ssh_key -u user_name "\
+           "-p ssh_port\n" ${0##*/} >&2
+           exit 2
+           ;;
+    esac
+done
+
+printf "Provided server parameters\n"
+printf "\tName: $NAME\n"
+printf "\tImage: $IMAGE\n"
+printf "\tType: $TYPE\n"
+printf "\tSSH Key: $SSH_KEY\n"
+printf "\tUser name: $USER_NAME\n"
+printf "\tSSH Port: $SSH_PORT\n"
+printf "\n"
+
+choice "Would you like to create the server? [Y/n]:"
+if [ "$CHOICE" != "n" ]; then
+    printf "Creating...\n"
+else
+    exit 0
+fi
+
+# a here-document to pass the cloud-init script
+hcloud server create --name "$NAME" --image "$IMAGE" --type "$TYPE" \
+                     --ssh-key "$SSH_KEY" --user-data-from-file - <<EOF
+#cloud-config
+users:
+  - name: $USER_NAME
+    ssh-authorized-keys:
+      - $SSH_PUB_KEY
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    groups: sudo
+    shell: /bin/bash
+runcmd:
+  - sed -i -e '/^#Port/s/^.*$/Port $SSH_PORT/' /etc/ssh/sshd_config
+  - systemctl restart sshd
+  - ufw allow $SSH_PORT/tcp
+  - ufw enable
+EOF
